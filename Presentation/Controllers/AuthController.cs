@@ -9,10 +9,11 @@ namespace Presentation.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class AuthController(IAuthService authService, SignInManager<AppUser> signInManager) : ControllerBase
+public class AuthController(IAuthService authService, SignInManager<AppUser> signInManager, IConfiguration config) : ControllerBase
 {
     private readonly IAuthService _authService = authService;
     private readonly SignInManager<AppUser> _signInManager = signInManager;
+    private readonly IConfiguration _config = config;
 
 
     [HttpPost("signup")]
@@ -32,16 +33,41 @@ public class AuthController(IAuthService authService, SignInManager<AppUser> sig
 
         }
 
-    [HttpPost("signin")]
-    public async Task<IActionResult> SignIn([FromBody] UserSignInForm form)
-    {
-        if (ModelState.IsValid) 
+        [HttpPost("signin")]
+        public async Task<IActionResult> SignIn([FromBody] UserSignInForm form)
         {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
             var result = await _signInManager.PasswordSignInAsync(form.Email, form.Password, false, false);
-            if (result.Succeeded) return Ok(new { message = "Login Successful" });
+
+            if (result.Succeeded)
+            {
+                var user = await _authService.GetUserByEmailAsync(form.Email);
+                var token = _authService.GenerateJwtToken(user!, _config);
+                return Ok(new { token, message = "Login successful" });
+            }
+
+            return Unauthorized(new { success = false, message = "Invalid login attempt." });
         }
 
-        return Unauthorized(new { message = "Invalid login attempt. Please check your email and password." });
+        [HttpPost("signout")]
+        public new async Task<IActionResult> SignOut()
+        {
+            await _signInManager.SignOutAsync();
+            return Ok(new { message = "Signed out successfully" });
+        }
 
-    }
+        [HttpGet("booking/{userId}")]
+        public async Task<ActionResult<BookingDto>> GetBookingInfo(string userId)
+        {
+            try
+            {
+                var bookingInfo = await _authService.GetAuthInfoToBookingAsync(userId);
+                return Ok(bookingInfo);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
 }
